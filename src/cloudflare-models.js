@@ -29,12 +29,24 @@ export async function discoverCloudflareModels(account, token, fetcher = cloudfl
   }
   return [...models].sort((a, b) => a.localeCompare(b));
 }
-export async function testCloudflareModel(account, token, model, fetcher = cloudflareFetch) {
+export async function testCloudflareModel(account, token, model, fetcher = cloudflareFetch, signal) {
   credentials(account, token);
   if (!model) throw new Error('Выберите модель.');
   const data = await request(`${base(account)}/v1/chat/completions`, token, {
-    method: 'POST', headers: { 'content-type':'application/json' },
+    method: 'POST', signal, headers: { 'content-type':'application/json' },
     body: JSON.stringify({ model, messages:[{role:'user',content:'Reply OK.'}], max_tokens:16, stream:false })
   }, fetcher);
   if (!data.choices?.[0]?.message?.content) throw new Error('Модель не вернула текстовый ответ.');
+}
+
+// Only successful text responses are considered verified. Failures may be temporary.
+export async function verifyCloudflareModels(models, test, { signal, onProgress = () => {} } = {}) {
+  const verified = []; let failed = 0;
+  for (const model of models) {
+    if (signal?.aborted) break;
+    try { await test(model, signal); if (signal?.aborted) break; verified.push(model); }
+    catch { if (signal?.aborted) break; failed++; }
+    onProgress({ checked: verified.length + failed, total: models.length, verified: [...verified], failed });
+  }
+  return { verified, failed, cancelled: !!signal?.aborted };
 }

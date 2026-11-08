@@ -16,3 +16,10 @@ test('model test sends a short inference request',async()=>{
   let call;await testCloudflareModel(account,token,'@cf/a',async(url,options)=>{call={url,options};return {ok:true,json:async()=>({choices:[{message:{content:'OK'}}]})}});
   assert.match(call.url,/ai\/v1\/chat\/completions$/);assert.equal(JSON.parse(call.options.body).max_tokens,16);
 });
+
+test('verification keeps only successful models and respects cancellation',async()=>{
+  const {verifyCloudflareModels}=await import('../src/cloudflare-models.js');
+  const progress=[];const result=await verifyCloudflareModels(['@ok','@error','@ok2'],async model=>{if(model==='@error')throw new Error('busy')},{onProgress:p=>progress.push(p)});
+  assert.deepEqual(result.verified,['@ok','@ok2']);assert.equal(result.failed,1);assert.equal(progress.at(-1).checked,3);
+  const controller=new AbortController();const stopped=await verifyCloudflareModels(['a','b'],async()=>{controller.abort()},{signal:controller.signal});assert.deepEqual(stopped.verified,[]);assert.equal(stopped.cancelled,true);
+});
