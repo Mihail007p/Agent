@@ -20,6 +20,7 @@
       <div class="side-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <button class="nav-item active"><span class="nav-icon">▤</span> Чат</button>
       <button class="nav-item" id="openProjectAgent"><span class="nav-icon">✳</span> Создать проект</button>
+      <button class="nav-item" id="openGithub"><span class="nav-icon">⌘</span> GitHub проекты</button>
       <button class="nav-item" id="openSettingsSide"><span class="nav-icon">⚙</span> Провайдеры и модели</button>
       <div class="history-head"><span class="side-label">НЕДАВНИЕ</span><button class="tiny-button" id="clearHistory" title="Очистить историю">•••</button></div>
       <div id="historyList" class="history-list"></div>
@@ -54,7 +55,9 @@
       <div class="composer-area">
         <form class="composer" id="composer">
           <textarea id="promptInput" rows="1" placeholder="Спросите что-нибудь…" aria-label="Сообщение"></textarea>
-          <div class="composer-footer"><div class="composer-hints"><span id="composerModel">Выберите провайдера в настройках</span></div><button class="send-button" id="sendButton" type="submit" aria-label="Отправить" disabled><span>↑</span></button></div>
+          <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
+          <input id="fileInput" type="file" multiple hidden>
+          <div class="composer-footer"><div class="composer-hints"><button id="attachButton" type="button" class="attach-button" aria-label="Прикрепить файлы">📎 Прикрепить</button> <span id="composerModel">Выберите провайдера в настройках</span></div><button class="send-button" id="sendButton" type="submit" aria-label="Отправить" disabled><span>↑</span></button></div>
         </form>
         <p class="disclaimer">Agent может ошибаться. Проверяйте важную информацию.</p>
       </div>
@@ -66,12 +69,23 @@
     <label class="field-label" for="providerSelect">ПРОВАЙДЕР</label>
     <div class="select-field"><select id="providerSelect"></select><span>⌄</span></div>
     <div id="endpointGroup" class="field-group hidden"><label class="field-label" for="endpointInput">АДРЕС API</label><input id="endpointInput" class="text-field" placeholder="https://api.example.com/v1" autocomplete="url"><p class="field-help">Для произвольного сервиса выберите «OpenAI-compatible» и укажите базовый URL.</p></div>
+    <div id="accountGroup" class="field-group hidden"><label class="field-label" for="accountInput">CLOUDFLARE ACCOUNT ID</label><input id="accountInput" class="text-field" placeholder="ID аккаунта Cloudflare" autocomplete="off"><p class="field-help">Токену необходимо разрешение Workers AI Read.</p></div>
     <div class="field-group"><label class="field-label" for="apiKeyInput">API-КЛЮЧ</label><div class="key-field"><input id="apiKeyInput" class="text-field" type="password" placeholder="Вставьте API-ключ" autocomplete="off" spellcheck="false"><button id="toggleKey" type="button" class="show-key">Показать</button></div><p class="field-help">Ключ хранится локально в браузере/приложении и отправляется только выбранному провайдеру.</p></div>
     <div class="field-group"><label class="field-label" for="modelInput">МОДЕЛЬ</label><input id="modelInput" class="text-field" placeholder="Например, gpt-4o-mini" autocomplete="off"><div class="model-presets" id="modelPresets"></div><p class="field-help">Можно указать любую модель, доступную вашему аккаунту.</p></div>
     <div class="advanced-toggle"><label><input type="checkbox" id="advancedToggle"> Настроить system prompt</label></div>
     <div class="field-group hidden" id="systemPromptGroup"><label class="field-label" for="systemPromptInput">SYSTEM PROMPT</label><textarea id="systemPromptInput" class="text-field system-prompt" rows="3" placeholder="Ты — полезный, точный и дружелюбный AI-ассистент."></textarea></div>
     <div class="security-callout"><span>♢</span><span><b>Приватность прежде всего</b><br>Не вводите ключ на чужих устройствах. Очистите данные приложения, чтобы удалить сохранённый ключ.</span></div>
     <div class="dialog-actions"><button class="secondary-button" id="cancelSettings">Отмена</button><button class="primary-button" id="saveSettings">Сохранить настройки</button></div>
+  </dialog>
+  <dialog id="githubDialog" class="settings-dialog">
+    <div class="dialog-head"><div><div class="dialog-eyebrow">ИНТЕГРАЦИЯ</div><h2>GitHub проекты</h2></div><button class="icon-button" id="closeGithub" aria-label="Закрыть">×</button></div>
+    <p class="dialog-intro">Подключите GitHub, чтобы выбрать текстовые файлы репозитория и добавить их в чат. Изменение файлов и push пока не поддерживаются.</p>
+    <label class="field-label" for="githubToken">GITHUB TOKEN</label>
+    <input id="githubToken" class="text-field" type="password" autocomplete="off" placeholder="GitHub fine-grained token">
+    <p class="field-help">Создайте токен с доступом Contents: Read-only к нужным репозиториям. Токен хранится только до закрытия страницы. Выбранные файлы отправляются AI-провайдеру и сохраняются в истории чата.</p>
+    <div class="dialog-actions"><button class="secondary-button" id="githubDisconnect" type="button">Отключить</button><button class="primary-button" id="githubConnect" type="button">Подключить</button></div>
+    <div id="githubBrowser" class="hidden"><label class="field-label" for="githubRepos">РЕПОЗИТОРИЙ</label><select id="githubRepos" class="text-field"></select><div class="github-path" id="githubPath"></div><button class="secondary-button" id="githubUp" type="button">↑ Назад</button><div id="githubFiles" class="github-files"></div></div>
+    <p id="githubStatus" class="field-help" role="status"></p>
   </dialog>
   <dialog id="projectDialog" class="settings-dialog project-dialog">
     <div class="dialog-head"><div><div class="dialog-eyebrow">AGENT WORKSPACE</div><h2>Создать проект по идее</h2></div><button class="icon-button" id="closeProject" aria-label="Закрыть">×</button></div>
