@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#101114" />
+  <meta name="description" content="Agent — личный AI-ассистент с поддержкой разных провайдеров и моделей." />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <title>Agent — AI assistant</title>
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-top">
+        <a class="brand" href="#" aria-label="Agent home"><span class="brand-mark">A</span><span>Agent</span></a>
+        <button class="icon-button mobile-close" id="closeSidebar" aria-label="Закрыть меню">×</button>
+      </div>
+      <button class="new-chat" id="newChat"><span class="plus">＋</span> Новый чат <kbd>⌘ K</kbd></button>
+      <div class="side-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <button class="nav-item active"><span class="nav-icon">▤</span> Чат</button>
+      <button class="nav-item" id="openProjectAgent"><span class="nav-icon">✳</span> Создать проект</button>
+      <button class="nav-item" id="openSettingsSide"><span class="nav-icon">⚙</span> Провайдеры и модели</button>
+      <div class="history-head"><span class="side-label">НЕДАВНИЕ</span><button class="tiny-button" id="clearHistory" title="Очистить историю">•••</button></div>
+      <div id="historyList" class="history-list"></div>
+      <div class="sidebar-bottom">
+        <div class="privacy-note"><span class="lock">◈</span><span>Ключи хранятся только<br>на этом устройстве</span></div>
+        <button class="profile" id="openSettingsBottom"><span class="avatar">A</span><span class="profile-copy"><b>Личный ассистент</b><small id="profileProvider">Настройте провайдера</small></span><span class="more">···</span></button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button menu-toggle" id="menuToggle" aria-label="Открыть меню">☰</button>
+        <div class="model-select-wrap"><button class="model-select" id="modelSelect"><span class="status-dot"></span><span id="modelLabel">Выберите модель</span><span class="chevron">⌄</span></button><div class="model-menu" id="modelMenu"></div></div>
+        <div class="top-actions"><span class="connection-status" id="connectionStatus">Локальный режим</span><button class="icon-button settings-top" id="openSettings" aria-label="Настройки">⚙</button></div>
+      </header>
+      <section class="conversation" id="conversation">
+        <div class="welcome" id="welcome">
+          <div class="welcome-orbit"><div class="orbit-ring"></div><div class="welcome-logo">A</div><i class="spark s1">✳</i><i class="spark s2">✦</i><i class="spark s3">·</i></div>
+          <div class="eyebrow">ВАШ AI-ПОМОЩНИК</div>
+          <h1>Чем могу помочь?</h1>
+          <p class="welcome-copy">Подключите любимую модель и начните диалог.<br>Ваши API-ключи остаются на устройстве.</p>
+          <div class="suggestions">
+            <button class="suggestion" data-prompt="Объясни сложную тему простыми словами и приведи пример."><span class="suggestion-icon blue">✳</span><span><b>Разобраться в теме</b><small>Объясни сложное простыми словами</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="Помоги придумать план проекта: цели, этапы, сроки и риски."><span class="suggestion-icon purple">⌁</span><span><b>Спланировать проект</b><small>От идеи до понятного плана</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="Напиши чистую, понятную функцию для решения следующей задачи: "><span class="suggestion-icon amber">{ }</span><span><b>Написать код</b><small>Продуманный код и объяснение</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="Помоги написать вежливое и ясное письмо на тему: "><span class="suggestion-icon green">✎</span><span><b>Создать текст</b><small>Письмо, пост или черновик</small></span><span class="suggestion-arrow">↗</span></button>
+          </div>
+          <button class="connect-cta" id="connectCta"><span>＋</span> Подключить модель <span class="cta-arrow">→</span></button>
+        </div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+      </section>
+      <div class="composer-area">
+        <form class="composer" id="composer">
+          <textarea id="promptInput" rows="1" placeholder="Спросите что-нибудь…" aria-label="Сообщение"></textarea>
+          <div class="composer-footer"><div class="composer-hints"><button type="button" class="attach-button" title="Вложения скоро появятся">＋</button><span class="hint-separator"></span><span id="composerModel">Выберите провайдера в настройках</span></div><button class="send-button" id="sendButton" type="submit" aria-label="Отправить" disabled><span>↑</span></button></div>
+        </form>
+        <p class="disclaimer">Agent может ошибаться. Проверяйте важную информацию.</p>
+      </div>
+    </main>
+  </div>
+  <dialog id="settingsDialog" class="settings-dialog">
+    <div class="dialog-head"><div><div class="dialog-eyebrow">НАСТРОЙКИ</div><h2>Провайдеры и модели</h2></div><button class="icon-button dialog-close" id="closeSettings" aria-label="Закрыть">×</button></div>
+    <p class="dialog-intro">Добавьте API-ключ выбранного сервиса. Поддерживаются встроенные интеграции и совместимые API.</p>
+    <label class="field-label" for="providerSelect">ПРОВАЙДЕР</label>
+    <div class="select-field"><select id="providerSelect"></select><span>⌄</span></div>
+    <div id="endpointGroup" class="field-group hidden"><label class="field-label" for="endpointInput">АДРЕС API</label><input id="endpointInput" class="text-field" placeholder="https://api.example.com/v1" autocomplete="url"><p class="field-help">Для произвольного сервиса выберите «OpenAI-compatible» и укажите базовый URL.</p></div>
+    <div class="field-group"><label class="field-label" for="apiKeyInput">API-КЛЮЧ</label><div class="key-field"><input id="apiKeyInput" class="text-field" type="password" placeholder="Вставьте API-ключ" autocomplete="off" spellcheck="false"><button id="toggleKey" type="button" class="show-key">Показать</button></div><p class="field-help">Ключ хранится локально в браузере/приложении и отправляется только выбранному провайдеру.</p></div>
+    <div class="field-group"><label class="field-label" for="modelInput">МОДЕЛЬ</label><input id="modelInput" class="text-field" placeholder="Например, gpt-4o-mini" autocomplete="off"><div class="model-presets" id="modelPresets"></div><p class="field-help">Можно указать любую модель, доступную вашему аккаунту.</p></div>
+    <div class="advanced-toggle"><label><input type="checkbox" id="advancedToggle"> Настроить system prompt</label></div>
+    <div class="field-group hidden" id="systemPromptGroup"><label class="field-label" for="systemPromptInput">SYSTEM PROMPT</label><textarea id="systemPromptInput" class="text-field system-prompt" rows="3" placeholder="Ты — полезный, точный и дружелюбный AI-ассистент."></textarea></div>
+    <div class="security-callout"><span>♢</span><span><b>Приватность прежде всего</b><br>Не вводите ключ на чужих устройствах. Очистите данные приложения, чтобы удалить сохранённый ключ.</span></div>
+    <div class="dialog-actions"><button class="secondary-button" id="cancelSettings">Отмена</button><button class="primary-button" id="saveSettings">Сохранить настройки</button></div>
+  </dialog>
+  <dialog id="projectDialog" class="settings-dialog project-dialog">
+    <div class="dialog-head"><div><div class="dialog-eyebrow">AGENT WORKSPACE</div><h2>Создать проект по идее</h2></div><button class="icon-button" id="closeProject" aria-label="Закрыть">×</button></div>
+    <p class="dialog-intro">Опишите результат своими словами. Агент составит план файлов, затем сгенерирует их по очереди и соберёт ZIP-архив.</p>
+    <div class="project-limit-note">Для генерации нужен API-ключ провайдера. Длинная генерация делает много отдельных запросов и расходует токены/деньги по тарифу модели.</div>
+    <div class="field-group project-idea-group"><label class="field-label" for="projectIdea">ВАША ИДЕЯ</label><textarea id="projectIdea" class="text-field system-prompt project-idea" rows="5" placeholder="Например: создай приложение учёта личных финансов с веб-интерфейсом, SQLite, авторизацией, тестами и инструкцией запуска…"></textarea></div>
+    <div class="project-controls"><label class="field-label" for="maxProjectFiles">МАКСИМУМ ФАЙЛОВ</label><select id="maxProjectFiles" class="text-field"><option value="8">8 — быстрый черновик</option><option value="16" selected>16 — стандартный</option><option value="30">30 — большой проект</option></select></div>
+    <div id="projectProgress" class="project-progress hidden"><div class="progress-heading"><span id="projectStatus">Подготовка…</span><span id="projectCount"></span></div><div class="progress-track"><div id="projectProgressBar"></div></div><div id="projectFileList" class="project-file-list"></div></div>
+    <div class="dialog-actions project-actions"><button class="secondary-button hidden" id="cancelProject">Остановить</button><button class="secondary-button hidden" id="downloadProject" disabled>Скачать ZIP</button><button class="primary-button" id="startProject">Сгенерировать проект</button></div>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
