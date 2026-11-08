@@ -1,11 +1,12 @@
+import { cloudflareFetch } from './cloudflare-transport.js';
 const base = account => `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/ai`;
 function credentials(account, token) {
   if (!/^[a-f0-9]{32}$/i.test(account) || !token) throw new Error('Укажите Account ID и API Token Cloudflare.');
 }
-async function request(url, token, options = {}, fetcher = fetch) {
+async function request(url, token, options = {}, fetcher = cloudflareFetch) {
   let response;
   try { response = await fetcher(url, { ...options, headers: { authorization: `Bearer ${token}`, ...options.headers } }); }
-  catch { throw new Error('Нет соединения с Cloudflare. Проверьте интернет и ограничения CORS.'); }
+  catch { throw new Error('Нет соединения с Cloudflare. Проверьте интернет; в браузере запрос может блокироваться CORS.'); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     const detail = Array.isArray(data.errors) ? data.errors.map(e => e.message).filter(Boolean).join('; ') : '';
@@ -13,7 +14,7 @@ async function request(url, token, options = {}, fetcher = fetch) {
   }
   return data;
 }
-export async function discoverCloudflareModels(account, token, fetcher = fetch) {
+export async function discoverCloudflareModels(account, token, fetcher = cloudflareFetch) {
   credentials(account, token);
   const models = new Set();
   // The catalog is paginated. Search only text generation models usable in chat.
@@ -28,7 +29,7 @@ export async function discoverCloudflareModels(account, token, fetcher = fetch) 
   }
   return [...models].sort((a, b) => a.localeCompare(b));
 }
-export async function testCloudflareModel(account, token, model, fetcher = fetch) {
+export async function testCloudflareModel(account, token, model, fetcher = cloudflareFetch) {
   credentials(account, token);
   if (!model) throw new Error('Выберите модель.');
   const data = await request(`${base(account)}/v1/chat/completions`, token, {
