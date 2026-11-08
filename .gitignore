@@ -1,3 +1,9 @@
 node_modules/
 dist/
 .DS_Store
+
+# CI diagnostics
+android-build.log
+playwright-report/
+test-results/
+.arena/

@@ -7,6 +7,9 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
+      - 'index.html'
+      - 'vite.config.js'
+      - 'tests/**'
       - 'android/**'
       - 'package.json'
       - 'package-lock.json'
@@ -16,9 +19,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-debug-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -26,7 +34,8 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          # Capacitor 7 generates Java 21 compile options. JDK 17 cannot compile them.
+          java-version: '21'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
       - name: Set up Node.js
@@ -36,12 +45,30 @@ jobs:
           cache: npm
       - name: Install JavaScript dependencies
         run: npm ci
-      - name: Build APK
-        run: npm run android:apk
+      - name: Test project generation and export helpers
+        run: npm test
+      - name: Build web assets and synchronize Android
+        run: npm run android:sync
+      - name: Build debug APK
+        shell: bash
+        working-directory: android
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../android-build.log
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: Agent-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Android-build-diagnostics
+          path: |
+            android-build.log
+            android/**/build/reports/**
+          if-no-files-found: warn
+          retention-days: 7

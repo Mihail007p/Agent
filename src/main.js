@@ -1,4 +1,6 @@
-import JSZip from 'jszip';
+import { Capacitor } from '@capacitor/core';
+import { extractPlan, fileContext, isFileReady, readyFiles, unwrapGeneratedFile } from './project.js';
+import { exportProject } from './export-project.js';
 import './style.css';
 
 const PROVIDERS = [
@@ -18,7 +20,10 @@ const PROVIDERS = [
 ];
 const $ = id => document.getElementById(id);
 const safeRead = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
-let settings = safeRead('agent.settings', { provider:'', providers:{}, systemPrompt:'Ты — полезный, точный и дружелюбный AI-ассистент. Отвечай на языке пользователя.' });
+const storedSettings = safeRead('agent.settings', {});
+let settings = storedSettings && typeof storedSettings==='object' && !Array.isArray(storedSettings) ? storedSettings : {};
+settings.provider=typeof settings.provider==='string'?settings.provider:'';
+settings.systemPrompt=typeof settings.systemPrompt==='string'?settings.systemPrompt:'Ты — полезный, точный и дружелюбный AI-ассистент. Отвечай на языке пользователя.';
 let chats = safeRead('agent.chats', []);
 let activeChatId = null;
 let busy = false;
@@ -28,7 +33,8 @@ function currentProvider(){return PROVIDERS.find(p=>p.id===settings.provider)||n
 function currentConfig(){return settings.providers?.[settings.provider]||{apiKey:'',model:currentProvider()?.models[0]||'',endpoint:currentProvider()?.endpoint||''}}
 function configured(){const c=currentConfig();return !!(currentProvider()&&c.apiKey&&c.model&&(currentProvider().mode!=='openai'||c.endpoint))}
 function showToast(text){const t=$('toast');t.textContent=text;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2600)}
-function saveData(){localStorage.setItem('agent.settings',JSON.stringify(settings));localStorage.setItem('agent.chats',JSON.stringify(chats))}
+let storageWarningShown=false;
+function saveData(){try{localStorage.setItem('agent.settings',JSON.stringify(settings));localStorage.setItem('agent.chats',JSON.stringify(chats));return true}catch{if(!storageWarningShown){storageWarningShown=true;showToast('Не удалось сохранить данные на устройстве. Проверьте разрешения и свободное место.')}return false}}
 function newChat(){if(activeChatId) saveActive();activeChatId=null;$('messages').innerHTML='';$('welcome').classList.remove('hidden');$('promptInput').value='';$('promptInput').focus();renderHistory();closeSidebar()}
 function activeChat(){return chats.find(c=>c.id===activeChatId)}
 function saveActive(){const c=activeChat();if(c){c.updated=Date.now();saveData();renderHistory()}}
@@ -64,35 +70,99 @@ async function sendMessage(text){if(!text.trim()||busy)return;if(!configured()){
 let projectCancelled=false;
 let projectController=null;
 let generatedProjectFiles=[];
+let currentProjectName='agent-project';
+let projectPlanTotal=0;
+let projectError='';
 function projectUI(status,done,total){$('projectStatus').textContent=status;$('projectCount').textContent=total?`${done} / ${total}`:'';$('projectProgressBar').style.width=total?`${Math.min(100,done/total*100)}%`:'0%'}
-function safeProjectPath(input){let path=String(input||'').replace(/\\/g,'/').trim().replace(/^\.\//,'');if(!path||path.startsWith('/')||/^[a-zA-Z]:/.test(path)||path.split('/').some(part=>part==='..'||part===''))return null;return path}
-function extractPlan(text){let clean=text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');let begin=clean.indexOf('{'),end=clean.lastIndexOf('}');if(begin<0||end<=begin)throw new Error('Не удалось прочитать план файлов. Попробуйте ещё раз или выберите модель с хорошей поддержкой JSON.');let parsed=JSON.parse(clean.slice(begin,end+1));if(!Array.isArray(parsed.files))throw new Error('Модель вернула план без списка файлов.');return parsed}
-function showProjectFiles(){const list=$('projectFileList');list.innerHTML='';generatedProjectFiles.forEach(file=>{const row=document.createElement('div');row.className='project-file-row'+(file.error?' error':'');row.innerHTML=`<span>${file.error?'⚠':'✓'} ${escapeHTML(file.path)}</span><span>${file.error?'ошибка':`${Math.max(1,Math.round(file.content.length/1024))} KB`}</span>`;list.appendChild(row)})}
-function setProjectBusy(value){$('startProject').disabled=value;$('startProject').classList.toggle('running',value);$('startProject').textContent=value?'Генерирую…':'Сгенерировать проект';$('cancelProject').classList.toggle('hidden',!value);$('downloadProject').classList.toggle('hidden',value||!generatedProjectFiles.some(f=>f.content));$('downloadProject').disabled=!generatedProjectFiles.some(f=>f.content)}
+function showProjectFiles(){const list=$('projectFileList');list.innerHTML='';generatedProjectFiles.forEach(file=>{const row=document.createElement('div');row.className='project-file-row'+(isFileReady(file)?'':' error');row.innerHTML=`<span>${isFileReady(file)?'✓':'⚠'} ${escapeHTML(file.path)}</span><span>${isFileReady(file)?`${Math.max(1,Math.round(file.content.length/1024))} KB`:'ошибка'}</span>`;list.appendChild(row)})}
+function setProjectBusy(value){$('downloadProject').textContent=Capacitor.isNativePlatform()?'Сохранить / отправить ZIP':'Скачать ZIP';$('startProject').disabled=value;$('startProject').classList.toggle('running',value);$('startProject').textContent=value?'Генерирую…':'Сгенерировать проект';$('cancelProject').classList.toggle('hidden',!value);$('downloadProject').classList.toggle('hidden',value||readyFiles(generatedProjectFiles).length===0);$('downloadProject').disabled=readyFiles(generatedProjectFiles).length===0}
 function openProjectDialog(){if(!configured()){openSettings();showToast('Подключите API-провайдера для создания проекта');return}$('projectDialog').showModal()}
-async function buildProject(){const idea=$('projectIdea').value.trim();if(!idea){showToast('Опишите идею проекта');return}if(!configured()){openSettings();return}projectCancelled=false;projectController=new AbortController();generatedProjectFiles=[];$('projectProgress').classList.remove('hidden');$('projectFileList').innerHTML='';$('downloadProject').classList.add('hidden');$('cancelProject').classList.remove('hidden');setProjectBusy(true);projectUI('Составляю план файлов…',0,0);const maxFiles=Number($('maxProjectFiles').value)||16;
-  const planSystem=`Ты — автономный технический архитектор и инженер по программированию. Из пользовательской идеи подготовь реалистичный, запускаемый проект. Верни ТОЛЬКО валидный JSON без markdown: {"projectName":"короткое-имя","files":[{"path":"относительный/путь.ext","description":"что реализовать в этом файле"}]}. Не более ${maxFiles} файлов. Включи минимально нужные исходники, README с командами запуска и тесты/конфигурацию по необходимости. Только текстовые файлы; не обещай внешние действия и не добавляй секреты. Пути — относительные, без ../.`;
-  try{
-    const planText=await requestAssistant([{role:'user',content:idea}],planSystem,projectController.signal);if(projectCancelled)return;const plan=extractPlan(planText);const seen=new Set();const files=plan.files.slice(0,maxFiles).map(f=>({path:safeProjectPath(f.path),description:String(f.description||'Реализуй этот файл согласно идее проекта.').slice(0,1000)})).filter(f=>f.path&&!seen.has(f.path)&&seen.add(f.path));if(!files.length)throw new Error('В плане нет безопасных путей файлов.');
-    const projectName=String(plan.projectName||'agent-project').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48)||'agent-project';projectUI('План готов. Генерирую файлы…',0,files.length);$('projectCount').textContent=`0 / ${files.length}`;
-    for(let i=0;i<files.length;i++){
-      if(projectCancelled)break;const f=files[i];projectUI(`Создаю ${f.path}`,i,files.length);
-      const fileSystem=`Ты — опытный разработчик. Создай содержимое ОДНОГО файла проекта. Верни только полное содержимое файла, без markdown-ограждений и пояснений. Не используй заглушки типа TODO или «реализуйте сами». Сохраняй согласованность с остальной структурой. Если нужны решения, выбирай простые и безопасные.`;
-      const prompt=`Идея проекта:\n${idea}\n\nИмя проекта: ${projectName}\n\nПлан файлов:\n${files.map(x=>`- ${x.path}: ${x.description}`).join('\n')}\n\nСгенерируй файл: ${f.path}\nТребование к этому файлу: ${f.description}\n\nОтветь только содержимым файла.`;
-      try{let content=await requestAssistant([{role:'user',content:prompt}],fileSystem,projectController.signal,8192);if(projectCancelled)break;content=content.replace(/^```[^\n]*\n/,'').replace(/\n```\s*$/,'');generatedProjectFiles.push({path:f.path,content});showProjectFiles();projectUI(`Готово: ${f.path}`,i+1,files.length)}catch(err){if(projectCancelled||err.name==='AbortError')break;generatedProjectFiles.push({path:f.path,content:'',error:true});showProjectFiles();projectUI(`Ошибка на файле ${f.path}: ${err.message}`,i,files.length);break}
+async function buildProject() {
+  const idea = $('projectIdea').value.trim();
+  if (!idea) { showToast('Опишите идею проекта'); return; }
+  if (!configured()) { openSettings(); return; }
+  const controller = new AbortController();
+  projectController = controller;
+  projectCancelled = false;
+  projectError = '';
+  projectPlanTotal = 0;
+  generatedProjectFiles = [];
+  $('projectProgress').classList.remove('hidden');
+  $('projectFileList').innerHTML = '';
+  setProjectBusy(true);
+  projectUI('Составляю план файлов…', 0, 0);
+  const maxFiles = Math.max(1, Math.min(30, Number($('maxProjectFiles').value) || 16));
+  const planSystem = `Ты — технический архитектор. Из идеи пользователя подготовь реалистичный проект. Верни ТОЛЬКО валидный JSON без markdown: {"projectName":"короткое-имя","files":[{"path":"относительный/путь.ext","description":"что реализовать"}]}. Не более ${maxFiles} файлов. Включи исходники, README с командами запуска и тесты по необходимости. Только текстовые файлы; без секретов и внешних действий. Пути относительные, без ../. Не обещай выполнение или тестирование кода: ты создаёшь исходники.`;
+  try {
+    const planText = await requestAssistant([{ role: 'user', content: idea }], planSystem, controller.signal);
+    if (controller.signal.aborted) return;
+    const plan = extractPlan(planText, maxFiles);
+    const files = plan.files;
+    currentProjectName = plan.projectName;
+    projectPlanTotal = files.length;
+    projectUI('План готов. Генерирую файлы…', 0, files.length);
+    for (let i = 0; i < files.length; i++) {
+      if (controller.signal.aborted) break;
+      const file = files[i];
+      projectUI(`Создаю ${file.path}`, i, files.length);
+      const fileSystem = 'Ты — опытный разработчик. Верни только полное содержимое ОДНОГО файла, без markdown-ограждений и пояснений. Не оставляй TODO и нереализованные функции. Используй точные имена и экспорты уже созданных файлов. Выбирай простые решения, соответствующие плану. Не утверждай, что выполнил или протестировал код.';
+      const context = fileContext(generatedProjectFiles);
+      const prompt = `Идея проекта:\n${idea}\n\nИмя: ${currentProjectName}\n\nПлан:\n${files.map(f => `- ${f.path}: ${f.description}`).join('\n')}\n\nСгенерируй файл: ${file.path}\nТребование: ${file.description}\n${context ? `\nУже созданные файлы (полные тексты; более ранние файлы могут не помещаться в бюджет контекста):\n${context}\n` : ''}\nОтветь только содержимым файла.`;
+      try {
+        const content = await requestAssistant([{ role: 'user', content: prompt }], fileSystem, controller.signal, 8192);
+        if (controller.signal.aborted) break;
+        generatedProjectFiles.push({ path: file.path, content: unwrapGeneratedFile(content) });
+        showProjectFiles();
+        projectUI(`Готово: ${file.path}`, i + 1, files.length);
+      } catch (error) {
+        if (controller.signal.aborted) break;
+        projectError = error.message;
+        generatedProjectFiles.push({ path: file.path, content: '', error: true });
+        showProjectFiles();
+        break;
+      }
     }
-    if(projectCancelled)projectUI('Остановлено. Можно скачать уже готовые файлы.',generatedProjectFiles.length,files.length);else if(generatedProjectFiles.length===files.length)projectUI('Проект готов. Скачайте ZIP.',files.length,files.length);
-  }catch(err){projectUI(err.name==='AbortError'?'Остановлено':`Ошибка: ${err.message}`,0,0)}finally{projectController=null;setProjectBusy(false);showProjectFiles()}
+    const count = readyFiles(generatedProjectFiles).length;
+    if (controller.signal.aborted || projectCancelled) {
+      projectUI(count ? 'Остановлено. Готовые файлы можно сохранить в ZIP.' : 'Остановлено до создания файлов.', count, files.length);
+    } else if (projectError) {
+      projectUI(`Ошибка: ${projectError}. Готовые файлы можно сохранить; для остальных запустите генерацию заново.`, count, files.length);
+    } else {
+      projectUI(`Проект готов.${plan.skipped ? ` Пропущено небезопасных/лишних путей: ${plan.skipped}.` : ''} Код не запускался и не тестировался.`, count, files.length);
+    }
+  } catch (error) {
+    projectUI(controller.signal.aborted ? 'Остановлено' : `Ошибка: ${error.message}`, readyFiles(generatedProjectFiles).length, projectPlanTotal);
+  } finally {
+    projectController = null;
+    setProjectBusy(false);
+    showProjectFiles();
+  }
 }
-async function downloadProjectZip(){const files=generatedProjectFiles.filter(f=>f.content);if(!files.length){showToast('Пока нет готовых файлов');return}const zip=new JSZip();for(const f of files)zip.file(f.path,f.content);try{const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='agent-generated-project.zip';a.click();URL.revokeObjectURL(url);showToast(`Скачано файлов: ${files.length}`)}catch(e){showToast(`Не удалось собрать ZIP: ${e.message}`)}}
+
+async function downloadProjectZip() {
+  if (!readyFiles(generatedProjectFiles).length) { showToast('Пока нет готовых файлов'); return; }
+  $('downloadProject').disabled = true;
+  $('downloadProject').textContent = 'Готовлю ZIP…';
+  try {
+    const result = await exportProject(generatedProjectFiles, currentProjectName);
+    showToast(result.native ? `ZIP с ${result.count} файлами передан системному меню` : `Загрузка ZIP началась · файлов: ${result.count}`);
+  } catch (error) {
+    showToast(`Не удалось сохранить ZIP: ${error.message}`);
+  } finally {
+    setProjectBusy(false);
+  }
+}
 
 function resizeInput(){const el=$('promptInput');el.style.height='auto';el.style.height=`${Math.min(el.scrollHeight,160)}px`;setStatus()}
-PROVIDERS.forEach(p=>{if(!settings.providers[p.id])settings.providers[p.id]={apiKey:'',model:p.models[0]||'',endpoint:p.endpoint}});
+if(!settings.providers||typeof settings.providers!=='object')settings.providers={};
+PROVIDERS.forEach(p=>{const saved=settings.providers[p.id];settings.providers[p.id]={apiKey:typeof saved?.apiKey==='string'?saved.apiKey:'',model:typeof saved?.model==='string'?saved.model:(p.models[0]||''),endpoint:typeof saved?.endpoint==='string'?saved.endpoint:p.endpoint}});
+if(!Array.isArray(chats))chats=[];
+chats=chats.filter(c=>c&&typeof c.id==='string'&&Array.isArray(c.messages)&&c.messages.every(m=>m&&typeof m.content==='string'&&['user','assistant'].includes(m.role)));
 $('newChat').onclick=newChat;$('openSettings').onclick=()=>openSettings();$('openSettingsSide').onclick=()=>openSettings();$('openSettingsBottom').onclick=()=>openSettings();$('connectCta').onclick=()=>openSettings();$('closeSettings').onclick=()=>$('settingsDialog').close();$('cancelSettings').onclick=()=>$('settingsDialog').close();$('providerSelect').onchange=updateProviderForm;
 $('modelPresets').onclick=e=>{const btn=e.target.closest('[data-model]');if(btn)$('modelInput').value=btn.dataset.model};
 $('toggleKey').onclick=()=>{const i=$('apiKeyInput');i.type=i.type==='password'?'text':'password';$('toggleKey').textContent=i.type==='password'?'Показать':'Скрыть'};
 $('advancedToggle').onchange=e=>$('systemPromptGroup').classList.toggle('hidden',!e.target.checked);
-$('saveSettings').onclick=()=>{const id=$('providerSelect').value,p=PROVIDERS.find(x=>x.id===id),apiKey=$('apiKeyInput').value.trim(),model=$('modelInput').value.trim(),endpoint=$('endpointInput').value.trim().replace(/\/+$/,'');if(!model){showToast('Укажите название модели');return}if(!apiKey){showToast('Добавьте API-ключ');return}if(p.mode==='openai'&&!endpoint){showToast('Укажите адрес API');return}settings.provider=id;settings.providers[id]={apiKey,model,endpoint:p.mode==='openai'?endpoint:p.endpoint};settings.systemPrompt=$('systemPromptInput').value.trim()||'Ты — полезный, точный и дружелюбный AI-ассистент. Отвечай на языке пользователя.';saveData();setStatus();$('settingsDialog').close();showToast('Настройки сохранены на устройстве')};
+$('saveSettings').onclick=()=>{const id=$('providerSelect').value,p=PROVIDERS.find(x=>x.id===id),apiKey=$('apiKeyInput').value.trim(),model=$('modelInput').value.trim(),endpoint=$('endpointInput').value.trim().replace(/\/+$/,'');if(!model){showToast('Укажите название модели');return}if(!apiKey){showToast('Добавьте API-ключ');return}if(p.mode==='openai'){try{const url=new URL(endpoint);if(url.protocol!=='https:'||url.username||url.password)throw new Error('HTTPS required')}catch{showToast('Укажите корректный адрес API на HTTPS, без логина и пароля в URL');return}}settings.provider=id;settings.providers[id]={apiKey,model,endpoint:p.mode==='openai'?endpoint:p.endpoint};settings.systemPrompt=$('systemPromptInput').value.trim()||'Ты — полезный, точный и дружелюбный AI-ассистент. Отвечай на языке пользователя.';const saved=saveData();setStatus();$('settingsDialog').close();if(saved)showToast('Настройки сохранены на устройстве')};
 $('composer').onsubmit=e=>{e.preventDefault();sendMessage($('promptInput').value)};$('promptInput').addEventListener('input',resizeInput);$('promptInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!$('sendButton').disabled)sendMessage($('promptInput').value)}});
 $('modelSelect').onclick=()=>$('modelMenu').classList.toggle('open');document.addEventListener('click',e=>{if(!e.target.closest('.model-select-wrap'))$('modelMenu').classList.remove('open')});
 document.querySelectorAll('.suggestion').forEach(b=>b.onclick=()=>{if(!configured()){openSettings();return}$('promptInput').value=b.dataset.prompt;resizeInput();$('promptInput').focus()});
@@ -100,5 +170,5 @@ $('messages').addEventListener('click',async e=>{const b=e.target.closest('[data
 $('clearHistory').onclick=()=>{if(confirm('Удалить все локальные чаты?')){chats=[];activeChatId=null;saveData();renderChat();renderHistory()}};
 $('menuToggle').onclick=()=>{$('sidebar').classList.add('open');$('scrim').classList.add('show')};$('closeSidebar').onclick=closeSidebar;$('scrim').onclick=closeSidebar;
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat()}if(e.key==='Escape')closeSidebar()});
-$('openProjectAgent').onclick=openProjectDialog;$('closeProject').onclick=()=>$('projectDialog').close();$('startProject').onclick=buildProject;$('downloadProject').onclick=downloadProjectZip;$('cancelProject').onclick=()=>{projectCancelled=true;projectController?.abort();projectUI('Останавливаю…',generatedProjectFiles.length,0)};
+$('openProjectAgent').onclick=openProjectDialog;$('closeProject').onclick=()=>$('projectDialog').close();$('startProject').onclick=buildProject;$('downloadProject').onclick=downloadProjectZip;$('cancelProject').onclick=()=>{projectCancelled=true;projectController?.abort();projectUI('Останавливаю…',readyFiles(generatedProjectFiles).length,projectPlanTotal)};
 renderHistory();setStatus();
